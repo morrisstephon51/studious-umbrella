@@ -1,0 +1,44 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/universal
+{
+  "name": "Container",
+  // Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
+  "image": "mcr.microsoft.com/devcontainers/universal:linux",
+
+  // Features to add to the dev container. More info: https://containers.dev/features.
+  // "features": {},
+
+  // Use 'forwardPorts' to make a list of ports inside the container available locally.
+  "forwardPorts": [3000, 4567, 9292],
+
+  "portsAttributes": {
+    "3000": {
+      "onAutoForward": "silent"
+    },
+    "4567": {
+      "onAutoForward": "silent"
+    },
+    "9292": {
+      "onAutoForward": "silent"
+    }
+  },
+
+  "otherPortsAttributes": {"onAutoForward": "ignore"},
+
+  // Use 'postCreateCommand' to run commands after the container is created.
+  "postCreateCommand": "sudo wget -qO ./prompt 'https://gist.githubusercontent.com/jelaniwoods/7e5db8d72b3dfac257b7eb562cfebf11/raw/af43083d91c0eb1489059a2ad9c39474a34ddbda/thoughtbot-style-prompt' && /bin/bash -l -c 'cat ./prompt >> ~/.bashrc' && rm ./prompt && source ~/.bashrc",
+
+  "customizations": {
+    "vscode": {
+      "extensions": ["vortizhe.simple-ruby-erb",
+                     "mbessey.vscode-rufo",
+                     "aliariff.vscode-erb-beautify",
+                     "eamodio.gitlens",
+                     "setobiralo.erb-commenter",
+                     "firstdraft.terminal-clear"]
+    }
+  }
+
+  // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+  // "remoteUser": "root"
+}
