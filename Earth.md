@@ -2,12 +2,14 @@
 <html>
   <head>
     <Title>Earth</Title>
+    <link href="css/stle.css" rel="stylesheet">
   </head>
 
   <Body>
   <h1 >Earth</h1>
     <p>Earth is<strong>the third planet from the Sun</strong>, and<strong>the only astronomical object known to harbor life</strong.>. </p>
 
+<img src=".jpg" alt= "earth from space">
   <h2>Orbit and Rotation</h2>
 
   <h3>Rotation</h3>
