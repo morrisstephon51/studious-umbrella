@@ -1,11 +1,24 @@
 body {
-  background-color: #333;
-  color: #f4f4f4;
+  margin: 0;
 }
-a {
-  color: darksalmon;
-  
+header{
+  background-color: #4a4a4a;
+  color: blanchedalmond;
+  text-align: center;
+  padding: 25px 0;
+  margin-bottom: 250px;
 }
-.intro {
-  font-size: 24px;
+Main{
+  background-color: #e4e4e4;
+  Width: 600px;
+  padding: 25px; 
+  border: solid 5px red;
+  margin: 100px auto;
+}
+footer{
+  background-color: #4a4a4a;
+  color: blachedalmond;
+  text-align: center;
+  padding: 25px 0;
+  margin-top: 25px;
 }
