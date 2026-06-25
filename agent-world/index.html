@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Agent World — Plug AI</title>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    html,body,#root{height:100%}
+    body{
+      background:#070b14;
+      color:#fff;
+      font-family:system-ui,-apple-system,'Segoe UI',sans-serif;
+      overflow-x:hidden;
+    }
+    ::-webkit-scrollbar{width:4px}
+    ::-webkit-scrollbar-track{background:#070b14}
+    ::-webkit-scrollbar-thumb{background:#1e293b;border-radius:2px}
+
+    /* Animated grid floor */
+    @keyframes gridScroll{
+      from{background-position:0 0}
+      to{background-position:60px 60px}
+    }
+    .world-floor{
+      position:fixed;inset:0;
+      background-image:
+        linear-gradient(rgba(99,102,241,0.12) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(99,102,241,0.12) 1px, transparent 1px);
+      background-size:60px 60px;
+      animation:gridScroll 10s linear infinite;
+      pointer-events:none;z-index:0;
+    }
+
+    /* Plumbob */
+    @keyframes plumbobSpin{
+      from{transform:rotate(45deg)}
+      to{transform:rotate(405deg)}
+    }
+    @keyframes plumbobFloat{
+      0%,100%{top:-28px}
+      50%{top:-36px}
+    }
+    .plumbob{
+      position:absolute;left:50%;margin-left:-9px;
+      width:18px;height:18px;
+      background:linear-gradient(135deg,#22c55e,#86efac,#22c55e);
+      box-shadow:0 0 8px #22c55e,0 0 20px rgba(34,197,94,0.5);
+      animation:plumbobSpin 2s linear infinite,plumbobFloat 1.5s ease-in-out infinite;
+      z-index:20;
+    }
+
+    /* Character animations */
+    @keyframes walk{
+      0%,100%{transform:translateY(0) scaleX(1)}
+      30%{transform:translateY(-8px) scaleX(0.94)}
+      70%{transform:translateY(-4px) scaleX(1.04)}
+    }
+    @keyframes think{
+      0%,100%{transform:scale(1);opacity:1}
+      50%{transform:scale(0.91);opacity:0.65}
+    }
+    @keyframes idle{
+      0%,100%{transform:translateY(0)}
+      50%{transform:translateY(2px)}
+    }
+    @keyframes blockShake{
+      0%,100%{transform:translateX(0)}
+      25%{transform:translateX(-4px)}
+      75%{transform:translateX(4px)}
+    }
+    @keyframes sleepSway{
+      0%,100%{transform:scale(0.97) rotate(-3deg);opacity:0.5}
+      50%{transform:scale(0.95) rotate(-6deg);opacity:0.4}
+    }
+    .s-working{animation:walk 0.65s ease-in-out infinite}
+    .s-thinking{animation:think 2s ease-in-out infinite}
+    .s-idle{animation:idle 3s ease-in-out infinite}
+    .s-blocked{animation:blockShake 0.3s ease-in-out infinite}
+    .s-sleeping{animation:sleepSway 4s ease-in-out infinite;filter:grayscale(0.4)}
+    .s-done{}
+
+    /* Thought bubble */
+    @keyframes bubblePop{
+      0%{transform:scale(0) translateY(8px);opacity:0}
+      60%{transform:scale(1.05) translateY(-2px);opacity:1}
+      100%{transform:scale(1) translateY(0);opacity:1}
+    }
+    .bubble-pop{animation:bubblePop 0.25s ease-out forwards}
+
+    /* ZZZ */
+    @keyframes zzzRise{
+      0%{opacity:0;transform:translateY(0) scale(0.6)}
+      35%{opacity:1}
+      100%{opacity:0;transform:translateY(-20px) scale(1.4)}
+    }
+    .zzz-a{animation:zzzRise 2.4s ease-out infinite 0s backwards}
+    .zzz-b{animation:zzzRise 2.4s ease-out infinite 0.8s backwards}
+    .zzz-c{animation:zzzRise 2.4s ease-out infinite 1.6s backwards}
+
+    /* XP bar fill */
+    @keyframes xpFill{from{width:0}}
+    .xp-bar-fill{animation:xpFill 1.4s ease-out forwards}
+
+    /* Panel slide in */
+    @keyframes panelIn{
+      from{transform:translateX(100%);opacity:0}
+      to{transform:translateX(0);opacity:1}
+    }
+    .panel-in{animation:panelIn 0.28s ease-out forwards}
+
+    /* Overlay */
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    .fade-in{animation:fadeIn 0.2s ease-out forwards}
+
+    /* Status dot pulse */
+    @keyframes dotPulse{
+      0%,100%{opacity:1}
+      50%{opacity:0.35}
+    }
+    .dot-pulse{animation:dotPulse 1.5s ease-in-out infinite}
+
+    /* Room card hover */
+    .room-card{
+      transition:transform 0.2s ease,box-shadow 0.2s ease;
+      cursor:pointer;
+    }
+    .room-card:hover{transform:translateY(-4px)}
+    .room-card:active{transform:translateY(-1px)}
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    /* ─── AGENT REGISTRY ─────────────────────────────── */
+    const AGENTS = [
+      {
+        id:'axis', name:'AXIS', role:'Executive Assistant & Ops Lead',
+        emoji:'🎯', color:'#6366f1', accent:'#818cf8', text:'#c7d2fe',
+        repo:'morrisstephon51/aeos', repoUrl:'https://github.com/morrisstephon51/aeos',
+        entity:'Plug AI',
+        description:'Runs Plug AI operations end-to-end. Tracks tasks, manages email, drafts, schedules events, and escalates decisions. Blunt. No sugarcoating. Revenue-first always.',
+        skills:['Task Management','Email Ops','Scheduling','Vendor Research','Escalation Protocol'],
+        task:'Reviewing open task backlog — surfacing stalled items >72h',
+        status:'working', xp:2840, level:8, done:142, streak:14,
+        achievements:[
+          {emoji:'📋',title:'First Brief',desc:'Delivered first daily brief',date:'2026-01-10'},
+          {emoji:'📬',title:'Zero Inbox',desc:'Cleared inbox 7 days straight',date:'2026-02-01'},
+          {emoji:'💵',title:'Revenue First',desc:'Closed first Plug AI revenue milestone',date:'2026-03-20'},
+        ],
+      },
+      {
+        id:'architect', name:'ARCHITECT', role:'Product Orchestrator',
+        emoji:'🏗️', color:'#f59e0b', accent:'#fbbf24', text:'#fde68a',
+        repo:'morrisstephon51/psychic-octo-engine', repoUrl:'https://github.com/morrisstephon51/psychic-octo-engine',
+        entity:'Plug AI',
+        description:'Orchestrates products from raw idea to launch. 13-stage pipeline across Discovery, Commercial, Compliance, Engineering, and Planning zones. 5-zone autonomous builder.',
+        skills:['Product Discovery','Commercial Strategy','Compliance Scan','Engineering Spec','Launch Planning'],
+        task:'Running Discovery → Commercial pipeline for new Plug AI campaign',
+        status:'thinking', xp:3200, level:9, done:87, streak:6,
+        achievements:[
+          {emoji:'📐',title:'Blueprint Master',desc:'Completed 50 product specs',date:'2026-03-15'},
+          {emoji:'✅',title:'Founder Approved',desc:'First plan approved at Gate H',date:'2026-04-01'},
+        ],
+      },
+      {
+        id:'grant-agent', name:'Grant Agent', role:'Grant Hunter',
+        emoji:'💰', color:'#10b981', accent:'#34d399', text:'#a7f3d0',
+        repo:'morrisstephon51/agent-ii', repoUrl:'https://github.com/morrisstephon51/agent-ii',
+        entity:'Plug AI',
+        description:'Weekly grant scanner. Scrapes sources, scores opportunities with Claude, generates reports, and fires deadline alerts. Runs every Monday at 8:00 AM via cron.',
+        skills:['Grant Scraping','Fit Scoring','Report Generation','Deadline Alerts','Cron Scheduling'],
+        task:'Sleeping — next scan: Monday 8:00 AM',
+        status:'sleeping', xp:1560, level:4, done:52, streak:12,
+        achievements:[
+          {emoji:'🎯',title:'Grant Hunter',desc:'Found 50+ matching grants',date:'2026-04-01'},
+          {emoji:'⏰',title:'Deadline Saver',desc:'Caught a grant deadline within 48h',date:'2026-04-15'},
+        ],
+      },
+      {
+        id:'video-council', name:'Video Council', role:'6-Agent Review Board',
+        emoji:'🎬', color:'#ef4444', accent:'#f87171', text:'#fca5a5',
+        repo:'morrisstephon51/ai-video-reel-generator', repoUrl:'https://github.com/morrisstephon51/ai-video-reel-generator',
+        entity:'Plug AI',
+        description:'Six-agent review council: Viral · Design · UX · Brand · Strategy · Compliance. Generates AI video reels using Pollinations images, gTTS voice, and Canvas+MediaRecorder. 100% free stack.',
+        skills:['Script Generation','AI Imagery (Pollinations)','Voice (gTTS)','Video Assembly (Canvas)','Council Review'],
+        task:'Awaiting reel submission — all 6 agents on standby',
+        status:'idle', xp:2100, level:6, done:34, streak:3,
+        achievements:[
+          {emoji:'🔥',title:'Viral Hit',desc:'Produced a 9+ viral score reel',date:'2026-05-10'},
+          {emoji:'🏆',title:'Council Approved',desc:'First unanimous 6-agent approval',date:'2026-05-12'},
+          {emoji:'🆓',title:'Free Forever',desc:'Zero paid APIs — ever',date:'2026-01-01'},
+        ],
+      },
+      {
+        id:'plug-ai', name:'The Plug AI', role:'Community Platform',
+        emoji:'⚡', color:'#8b5cf6', accent:'#a78bfa', text:'#ddd6fe',
+        repo:'morrisstephon51/psychic-bassoon', repoUrl:'https://github.com/morrisstephon51/psychic-bassoon',
+        entity:'Plug AI',
+        description:'Live community hub for Plug AI. Workshops, resources, learning paths, community forums. Deployed and serving users. Built with Next.js + Tailwind.',
+        skills:['Community Hub','Workshops','Resource Library','Content Engine','Live Events'],
+        task:'Live at psychic-bassoon-cam6stef.vercel.app',
+        status:'working', xp:1800, level:5, done:61, streak:21,
+        achievements:[
+          {emoji:'🚀',title:'Shipped',desc:'First deploy to Vercel production',date:'2026-04-20'},
+          {emoji:'👥',title:'Community Live',desc:'First community member joined',date:'2026-05-01'},
+        ],
+      },
+      {
+        id:'content-machine', name:'Content Machine', role:'Content Production Engine',
+        emoji:'⚙️', color:'#0ea5e9', accent:'#38bdf8', text:'#bae6fd',
+        repo:'morrisstephon51/content-machine', repoUrl:'https://github.com/morrisstephon51/content-machine',
+        entity:'Plug AI',
+        description:'Full content production pipeline. Auth + protected routes, Remotion video rendering, Supabase storage, and scheduled publishing workflows. Tests included.',
+        skills:['Content Pipeline','Remotion Video','Supabase Storage','Auth & Sessions','Scheduling'],
+        task:'Idle — awaiting new content queue batch',
+        status:'idle', xp:920, level:3, done:28, streak:2,
+        achievements:[],
+      },
+      {
+        id:'enrollment-agent', name:'Enrollment Agent', role:'BigHeart Funnel Analyst',
+        emoji:'📊', color:'#f97316', accent:'#fb923c', text:'#fed7aa',
+        repo:'morrisstephon51/enrollment_funnel_agent', repoUrl:'https://github.com/morrisstephon51/enrollment_funnel_agent',
+        entity:'BigHeart',
+        description:'Analyzes BigHeart Health social performance weekly. Scores content, detects engagement drops, generates Claude-powered narrative reports, exports to Canva.',
+        skills:['CSV Analytics','Engagement Scoring','Drop Detection','Claude Narrative','Canva Export'],
+        task:'Waiting for weekly CSV upload (Mondays)',
+        status:'sleeping', xp:740, level:2, done:18, streak:4,
+        achievements:[
+          {emoji:'📈',title:'First Report',desc:'Generated first weekly narrative report',date:'2026-06-02'},
+        ],
+      },
+      {
+        id:'job-scanner', name:'Job Scanner', role:'Opportunity Finder',
+        emoji:'🔍', color:'#ec4899', accent:'#f472b6', text:'#fbcfe8',
+        repo:'morrisstephon51/job_opportunity_scanner', repoUrl:'https://github.com/morrisstephon51/job_opportunity_scanner',
+        entity:'Personal',
+        description:'Scans ZipRecruiter and Indeed daily for AI/EdTech/Healthcare IT roles. Scores by fit, surfaces top 3, writes tailored cover letters. Salary floor $55K.',
+        skills:['ZipRecruiter Search','Indeed Search','Fit Scoring','Cover Letter Writing','Salary Filtering'],
+        task:"Run /scan to find today's top opportunities",
+        status:'idle', xp:480, level:2, done:12, streak:0,
+        achievements:[],
+      },
+    ];
+
+    /* ─── CONSTANTS ───────────────────────────────────── */
+    const STATUS = {
+      working:  {label:'Working',    color:'#22c55e', pulse:true},
+      thinking: {label:'Thinking…',  color:'#eab308', pulse:true},
+      idle:     {label:'Idle',       color:'#6b7280', pulse:false},
+      done:     {label:'Done',       color:'#3b82f6', pulse:false},
+      blocked:  {label:'Blocked',    color:'#ef4444', pulse:true},
+      sleeping: {label:'Sleeping',   color:'#8b5cf6', pulse:false},
+    };
+
+    const ENTITY_COLOR = {'Plug AI':'#6366f1','BigHeart':'#f97316','Personal':'#ec4899'};
+    const LVL = ['','Apprentice','Apprentice','Agent','Agent','Senior','Senior','Principal','Principal','Director'];
+
+    function xpPct(a) {
+      const base = (a.level-1)*400, cap = a.level*400;
+      return Math.min(100, Math.max(0, ((a.xp-base)/(cap-base))*100));
+    }
+
+    /* ─── THOUGHT BUBBLE ──────────────────────────────── */
+    function ThoughtBubble({agent, tick}) {
+      const isThinking = agent.status==='thinking'||agent.status==='blocked';
+      const dots = isThinking ? ['','.','..',  '...'][tick%4] : '';
+      return (
+        <div className="bubble-pop" style={{
+          position:'absolute',bottom:'100%',left:'50%',
+          transform:'translateX(-50%)',marginBottom:10,
+          zIndex:30,minWidth:160,maxWidth:210,
+        }}>
+          <div style={{
+            background:'#1c2438',
+            border:'1px solid rgba(255,255,255,0.1)',
+            borderRadius:14,padding:'7px 11px',
+            fontSize:11,lineHeight:1.4,
+            color:'rgba(255,255,255,0.85)',textAlign:'center',
+            boxShadow:'0 4px 20px rgba(0,0,0,0.5)',
+          }}>
+            {agent.task}{dots}
+          </div>
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2,paddingTop:3}}>
+            <div style={{width:7,height:7,borderRadius:'50%',background:'#1c2438',border:'1px solid rgba(255,255,255,0.1)'}} />
+            <div style={{width:5,height:5,borderRadius:'50%',background:'#1c2438',border:'1px solid rgba(255,255,255,0.1)'}} />
+            <div style={{width:3,height:3,borderRadius:'50%',background:'#1c2438',border:'1px solid rgba(255,255,255,0.1)'}} />
+          </div>
+        </div>
+      );
+    }
+
+    /* ─── AGENT CARD ──────────────────────────────────── */
+    function AgentCard({agent, selected, tick, onSelect}) {
+      const meta = STATUS[agent.status];
+      const pct  = xpPct(agent);
+      const showBubble = selected || agent.status==='working' || agent.status==='thinking';
+      const ec = ENTITY_COLOR[agent.entity];
+
+      return (
+        <div
+          className="room-card"
+          onClick={onSelect}
+          style={{
+            position:'relative',
+            borderRadius:20,overflow:'visible',
+            background:`linear-gradient(135deg, ${agent.color}18 0%, #0a0f1a 80%)`,
+            border:`1px solid ${selected ? agent.color+'80' : agent.color+'28'}`,
+            boxShadow: selected
+              ? `0 0 0 1px ${agent.color}40,0 8px 32px ${agent.color}30,inset 0 1px 0 ${agent.color}20`
+              : `0 4px 20px rgba(0,0,0,0.4),inset 0 1px 0 ${agent.color}10`,
+            padding:16,
+          }}
+        >
+          {/* Floor grid */}
+          <div style={{
+            position:'absolute',inset:0,borderRadius:20,overflow:'hidden',opacity:0.04,
+            backgroundImage:`linear-gradient(${agent.color} 1px,transparent 1px),linear-gradient(90deg,${agent.color} 1px,transparent 1px)`,
+            backgroundSize:'22px 22px',pointerEvents:'none',
+          }}/>
+
+          {/* Plumbob */}
+          {selected && <div className="plumbob" />}
+
+          <div style={{position:'relative',display:'flex',flexDirection:'column',alignItems:'center',gap:10}}>
+
+            {/* Entity + Level badges */}
+            <div style={{width:'100%',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+              <span style={{fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:999,background:`${ec}20`,color:ec}}>
+                {agent.entity}
+              </span>
+              <span style={{fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:999,background:`${agent.color}20`,color:agent.accent}}>
+                Lv.{agent.level} {LVL[agent.level]}
+              </span>
+            </div>
+
+            {/* Character area */}
+            <div style={{
+              position:'relative',display:'flex',flexDirection:'column',alignItems:'center',
+              paddingTop: showBubble ? 76 : 0,
+              transition:'padding-top 0.2s ease',
+            }}>
+              {showBubble && <ThoughtBubble agent={agent} tick={tick} />}
+
+              {/* Glow ring */}
+              <div style={{
+                width:72,height:72,borderRadius:'50%',
+                background:`radial-gradient(circle,${agent.color}30 0%,transparent 70%)`,
+                boxShadow:`0 0 24px ${agent.color}28`,
+                display:'flex',alignItems:'center',justifyContent:'center',
+                position:'relative',
+              }}>
+                <span className={`s-${agent.status}`} style={{fontSize:36,lineHeight:1,display:'block'}}>
+                  {agent.emoji}
+                </span>
+
+                {/* ZZZ */}
+                {agent.status==='sleeping' && (
+                  <div style={{position:'absolute',top:-6,right:-8,display:'flex',flexDirection:'column',alignItems:'center',gap:1}}>
+                    <span className="zzz-c" style={{display:'block',fontSize:12,color:'#a78bfa',fontWeight:800}}>z</span>
+                    <span className="zzz-b" style={{display:'block',fontSize:10,color:'#c4b5fd',fontWeight:700}}>z</span>
+                    <span className="zzz-a" style={{display:'block',fontSize:8,color:'#ddd6fe',fontWeight:600}}>z</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Status */}
+            <div style={{display:'flex',alignItems:'center',gap:6}}>
+              <div
+                className={meta.pulse ? 'dot-pulse' : ''}
+                style={{width:6,height:6,borderRadius:'50%',background:meta.color,boxShadow:`0 0 6px ${meta.color}`}}
+              />
+              <span style={{fontSize:11,fontWeight:600,color:meta.color}}>{meta.label}</span>
+            </div>
+
+            {/* Name + role */}
+            <div style={{textAlign:'center'}}>
+              <div style={{fontSize:14,fontWeight:700,color:'#fff'}}>{agent.name}</div>
+              <div style={{fontSize:11,color:'#94a3b8',marginTop:2,lineHeight:1.3}}>{agent.role}</div>
+            </div>
+
+            {/* Stats row */}
+            <div style={{width:'100%',display:'flex',justifyContent:'space-between',borderTop:'1px solid rgba(255,255,255,0.05)',paddingTop:8}}>
+              {[
+                {v:agent.done,  l:'tasks'},
+                {v:agent.xp.toLocaleString(), l:'XP'},
+                {v:agent.streak>0?`🔥${agent.streak}`:'—', l:'streak'},
+              ].map(s=>(
+                <div key={s.l} style={{textAlign:'center',flex:1}}>
+                  <div style={{fontSize:12,fontWeight:700,color:s.l==='XP'?agent.accent:'#fff'}}>{s.v}</div>
+                  <div style={{fontSize:10,color:'#475569'}}>{s.l}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* XP bar */}
+            <div style={{width:'100%'}}>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:9,color:'#475569',marginBottom:4}}>
+                <span>{agent.xp.toLocaleString()} XP</span>
+                <span>→ Lv.{agent.level+1}</span>
+              </div>
+              <div style={{width:'100%',height:4,borderRadius:999,background:'rgba(255,255,255,0.06)'}}>
+                <div
+                  className="xp-bar-fill"
+                  style={{
+                    height:'100%',borderRadius:999,
+                    width:`${pct}%`,
+                    background:`linear-gradient(90deg,${agent.color},${agent.accent})`,
+                    boxShadow:`0 0 6px ${agent.color}80`,
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ─── AGENT PANEL ─────────────────────────────────── */
+    function AgentPanel({agent, onClose}) {
+      const meta = STATUS[agent.status];
+      const pct  = xpPct(agent);
+      const ec   = ENTITY_COLOR[agent.entity];
+
+      return (
+        <>
+          <div
+            className="fade-in"
+            onClick={onClose}
+            style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',backdropFilter:'blur(5px)',zIndex:40}}
+          />
+          <div
+            className="panel-in"
+            style={{
+              position:'fixed',top:0,right:0,bottom:0,width:360,
+              background:'linear-gradient(180deg,#0e1422 0%,#070b14 100%)',
+              borderLeft:`1px solid ${agent.color}30`,
+              zIndex:50,overflowY:'auto',
+            }}
+          >
+            {/* Header */}
+            <div style={{
+              position:'sticky',top:0,zIndex:10,
+              padding:'24px 24px 16px',
+              background:`linear-gradient(180deg,${agent.color}18 0%,transparent 100%)`,
+              borderBottom:'1px solid rgba(255,255,255,0.04)',
+            }}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}>
+                <div style={{display:'flex',gap:12,alignItems:'center'}}>
+                  <div style={{
+                    width:54,height:54,borderRadius:16,
+                    background:`${agent.color}20`,border:`1px solid ${agent.color}40`,
+                    display:'flex',alignItems:'center',justifyContent:'center',
+                    fontSize:26,boxShadow:`0 0 20px ${agent.color}20`,
+                  }}>{agent.emoji}</div>
+                  <div>
+                    <div style={{fontSize:18,fontWeight:800,color:'#fff'}}>{agent.name}</div>
+                    <div style={{fontSize:12,color:'#94a3b8',marginTop:2}}>{agent.role}</div>
+                    <div style={{fontSize:11,color:ec,fontWeight:700,marginTop:3}}>{agent.entity}</div>
+                  </div>
+                </div>
+                <button
+                  onClick={onClose}
+                  style={{
+                    width:32,height:32,borderRadius:'50%',
+                    background:'rgba(255,255,255,0.06)',border:'none',
+                    color:'#94a3b8',cursor:'pointer',fontSize:13,
+                    display:'flex',alignItems:'center',justifyContent:'center',
+                  }}
+                >✕</button>
+              </div>
+
+              {/* Status badge */}
+              <div style={{
+                display:'flex',alignItems:'flex-start',gap:8,
+                padding:'10px 12px',borderRadius:12,
+                background:`${meta.color}12`,border:`1px solid ${meta.color}30`,
+              }}>
+                <div style={{width:8,height:8,borderRadius:'50%',background:meta.color,marginTop:4,flexShrink:0,boxShadow:`0 0 6px ${meta.color}`}} />
+                <div>
+                  <span style={{fontSize:13,fontWeight:700,color:meta.color}}>{meta.label}</span>
+                  <div style={{fontSize:11,color:'#64748b',marginTop:2,lineHeight:1.4}}>{agent.task}</div>
+                </div>
+              </div>
+            </div>
+
+            <div style={{padding:'0 24px 40px',display:'flex',flexDirection:'column',gap:20}}>
+
+              {/* Description */}
+              <p style={{fontSize:13,color:'#94a3b8',lineHeight:1.65,marginTop:20}}>{agent.description}</p>
+
+              {/* XP card */}
+              <div style={{borderRadius:16,padding:16,background:`${agent.color}12`,border:`1px solid ${agent.color}28`}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:10,color:'#475569',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:4}}>Level</div>
+                    <div style={{fontSize:24,fontWeight:800,color:agent.accent}}>
+                      {agent.level} <span style={{fontSize:13,fontWeight:500,color:'#94a3b8'}}>{LVL[agent.level]}</span>
+                    </div>
+                  </div>
+                  <div style={{textAlign:'right'}}>
+                    <div style={{fontSize:10,color:'#475569',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:4}}>Total XP</div>
+                    <div style={{fontSize:24,fontWeight:800,color:'#fff'}}>{agent.xp.toLocaleString()}</div>
+                  </div>
+                </div>
+                <div style={{width:'100%',height:8,borderRadius:999,background:'rgba(255,255,255,0.06)',marginBottom:6}}>
+                  <div className="xp-bar-fill" style={{
+                    height:'100%',borderRadius:999,width:`${pct}%`,
+                    background:`linear-gradient(90deg,${agent.color},${agent.accent})`,
+                    boxShadow:`0 0 10px ${agent.color}60`,
+                  }}/>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:'#475569'}}>
+                  <span>{agent.xp.toLocaleString()} XP</span>
+                  <span>{(agent.level*400).toLocaleString()} XP → Lv.{agent.level+1}</span>
+                </div>
+              </div>
+
+              {/* Stats grid */}
+              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
+                {[
+                  {l:'Tasks Done', v:agent.done},
+                  {l:'Day Streak',  v:agent.streak>0?`🔥 ${agent.streak}`:'0'},
+                  {l:'Achievements', v:agent.achievements.length},
+                ].map(s=>(
+                  <div key={s.l} style={{borderRadius:12,padding:'10px 12px',textAlign:'center',background:'#111827',border:'1px solid rgba(255,255,255,0.05)'}}>
+                    <div style={{fontSize:18,fontWeight:700,color:'#fff'}}>{s.v}</div>
+                    <div style={{fontSize:10,color:'#475569',marginTop:2}}>{s.l}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Skills */}
+              <div>
+                <div style={{fontSize:10,color:'#475569',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:10}}>Skills</div>
+                <div style={{display:'flex',flexWrap:'wrap',gap:7}}>
+                  {agent.skills.map(s=>(
+                    <span key={s} style={{
+                      fontSize:11,fontWeight:600,padding:'4px 10px',borderRadius:999,
+                      background:`${agent.color}18`,color:agent.text,border:`1px solid ${agent.color}30`,
+                    }}>{s}</span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Achievements */}
+              {agent.achievements.length>0 && (
+                <div>
+                  <div style={{fontSize:10,color:'#475569',textTransform:'uppercase',letterSpacing:'0.08em',marginBottom:10}}>Achievements</div>
+                  <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                    {agent.achievements.map(a=>(
+                      <div key={a.title} style={{
+                        display:'flex',gap:12,padding:12,borderRadius:12,
+                        background:'#111827',border:'1px solid rgba(255,255,255,0.05)',
+                        alignItems:'flex-start',
+                      }}>
+                        <span style={{fontSize:22,lineHeight:1}}>{a.emoji}</span>
+                        <div>
+                          <div style={{fontSize:13,fontWeight:700,color:'#fff'}}>{a.title}</div>
+                          <div style={{fontSize:11,color:'#64748b',marginTop:2}}>{a.desc}</div>
+                          <div style={{fontSize:10,color:'#334155',marginTop:4}}>{a.date}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* GitHub link */}
+              <a
+                href={agent.repoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  display:'flex',justifyContent:'space-between',alignItems:'center',
+                  padding:'12px 16px',borderRadius:12,textDecoration:'none',
+                  background:`${agent.color}15`,border:`1px solid ${agent.color}30`,
+                  color:agent.accent,fontSize:13,fontWeight:600,
+                }}
+              >
+                <span>View Repository ↗</span>
+                <span style={{fontSize:10,color:'#64748b',fontFamily:'monospace'}}>{agent.repo}</span>
+              </a>
+            </div>
+          </div>
+        </>
+      );
+    }
+
+    /* ─── SCOREBOARD ──────────────────────────────────── */
+    function Scoreboard({agents}) {
+      const sorted = [...agents].sort((a,b)=>b.xp-a.xp);
+      const medals = ['🥇','🥈','🥉'];
+
+      return (
+        <div style={{marginTop:32,borderRadius:20,overflow:'hidden',background:'#0d1120',border:'1px solid rgba(255,255,255,0.05)'}}>
+          <div style={{padding:'14px 20px',borderBottom:'1px solid rgba(255,255,255,0.05)',display:'flex',alignItems:'center',gap:8}}>
+            <span style={{fontSize:16}}>🏆</span>
+            <span style={{fontWeight:700,fontSize:14,color:'#fff'}}>Agent Leaderboard</span>
+            <span style={{marginLeft:'auto',fontSize:11,color:'#475569'}}>Ranked by XP</span>
+          </div>
+          {sorted.map((agent,i)=>(
+            <div key={agent.id} style={{
+              display:'flex',alignItems:'center',gap:12,
+              padding:'10px 20px',
+              borderBottom:i<sorted.length-1?'1px solid rgba(255,255,255,0.03)':'none',
+            }}>
+              <div style={{width:28,textAlign:'center',fontSize:14,fontWeight:700,color:'#475569',flexShrink:0}}>
+                {medals[i]||`#${i+1}`}
+              </div>
+              <div style={{
+                width:36,height:36,borderRadius:10,flexShrink:0,
+                background:`${agent.color}20`,border:`1px solid ${agent.color}30`,
+                display:'flex',alignItems:'center',justifyContent:'center',fontSize:20,
+              }}>{agent.emoji}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:13,fontWeight:700,color:'#fff'}}>{agent.name}</span>
+                  <span style={{fontSize:10,padding:'1px 6px',borderRadius:999,fontWeight:600,background:`${agent.color}20`,color:agent.accent}}>
+                    {LVL[agent.level]}
+                  </span>
+                </div>
+                <div style={{fontSize:11,color:'#475569',marginTop:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{agent.role}</div>
+              </div>
+              <div style={{width:80,flexShrink:0}}>
+                <div style={{width:'100%',height:3,borderRadius:999,background:'rgba(255,255,255,0.05)'}}>
+                  <div style={{
+                    height:'100%',borderRadius:999,
+                    width:`${xpPct(agent)}%`,
+                    background:`linear-gradient(90deg,${agent.color},${agent.accent})`,
+                  }}/>
+                </div>
+              </div>
+              <div style={{textAlign:'right',flexShrink:0}}>
+                <div style={{fontSize:13,fontWeight:700,color:agent.accent}}>{agent.xp.toLocaleString()}</div>
+                <div style={{fontSize:10,color:'#475569'}}>Lv.{agent.level}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    /* ─── HEADER ──────────────────────────────────────── */
+    function Header({agents}) {
+      const totalXP = agents.reduce((s,a)=>s+a.xp,0);
+      const online  = agents.filter(a=>a.status==='working'||a.status==='thinking').length;
+      const today   = new Date().toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric',year:'numeric'});
+
+      return (
+        <header style={{
+          position:'sticky',top:0,zIndex:30,
+          borderBottom:'1px solid rgba(255,255,255,0.05)',
+          background:'rgba(7,11,20,0.92)',
+          backdropFilter:'blur(12px)',
+          padding:'13px 24px',
+          display:'flex',alignItems:'center',justifyContent:'space-between',gap:16,
+        }}>
+          {/* Logo */}
+          <div style={{display:'flex',alignItems:'center',gap:10,flexShrink:0}}>
+            <div style={{
+              width:36,height:36,borderRadius:10,
+              background:'rgba(99,102,241,0.2)',border:'1px solid rgba(99,102,241,0.4)',
+              display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,
+            }}>🌐</div>
+            <div>
+              <div style={{fontWeight:800,fontSize:14,color:'#fff',letterSpacing:'0.02em'}}>AGENT WORLD</div>
+              <div style={{fontSize:10,color:'#6366f1',letterSpacing:'0.1em',textTransform:'uppercase'}}>Plug AI Operations</div>
+            </div>
+          </div>
+
+          {/* Chips */}
+          <div style={{display:'flex',alignItems:'center',gap:8,flex:1,justifyContent:'center',flexWrap:'wrap'}}>
+            {[
+              {l:'Agents',  v:agents.length,                c:'#6366f1'},
+              {l:'Total XP',v:totalXP.toLocaleString(),    c:'#f59e0b'},
+              {l:'Online',  v:`${online} active`,c:'#22c55e',dot:true},
+              {l:'Repos',   v:'8 linked',                  c:'#0ea5e9'},
+            ].map(chip=>(
+              <div key={chip.l} style={{
+                display:'flex',alignItems:'center',gap:6,
+                padding:'5px 12px',borderRadius:999,
+                background:`${chip.c}12`,border:`1px solid ${chip.c}30`,
+                color:chip.c,fontSize:12,fontWeight:600,
+              }}>
+                {chip.dot && <div className="dot-pulse" style={{width:6,height:6,borderRadius:'50%',background:chip.c}} />}
+                <span style={{color:'rgba(255,255,255,0.4)',fontWeight:400}}>{chip.l}:</span>
+                <span>{chip.v}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* Date */}
+          <div style={{textAlign:'right',flexShrink:0}}>
+            <div style={{fontSize:12,color:'#94a3b8',fontWeight:500}}>{today}</div>
+            <div style={{fontSize:10,color:'#6366f1',marginTop:2}}>Morris Stephon · Plug AI</div>
+          </div>
+        </header>
+      );
+    }
+
+    /* ─── APP ─────────────────────────────────────────── */
+    function App() {
+      const [selected, setSelected] = useState(null);
+      const [tick, setTick] = useState(0);
+
+      useEffect(()=>{
+        const id = setInterval(()=>setTick(t=>t+1), 2500);
+        return ()=>clearInterval(id);
+      },[]);
+
+      function pick(agent) {
+        setSelected(prev=>prev?.id===agent.id ? null : agent);
+      }
+
+      return (
+        <div style={{minHeight:'100vh',position:'relative'}}>
+          <div className="world-floor" />
+
+          {/* Center radial glow */}
+          <div style={{
+            position:'fixed',inset:0,pointerEvents:'none',
+            background:'radial-gradient(ellipse 70% 40% at 50% 20%,rgba(99,102,241,0.07) 0%,transparent 70%)',
+          }}/>
+
+          <Header agents={AGENTS} />
+
+          <main style={{position:'relative',zIndex:1,maxWidth:1200,margin:'0 auto',padding:'28px 20px'}}>
+
+            {/* World label */}
+            <div style={{textAlign:'center',marginBottom:24}}>
+              <div style={{
+                display:'inline-flex',alignItems:'center',gap:8,
+                padding:'6px 16px',borderRadius:999,
+                background:'rgba(255,255,255,0.03)',border:'1px solid rgba(255,255,255,0.06)',
+                fontSize:12,color:'#64748b',
+              }}>
+                <div className="dot-pulse" style={{width:6,height:6,borderRadius:'50%',background:'#6366f1'}} />
+                Click any agent to inspect &nbsp;·&nbsp; {AGENTS.length} agents deployed across {new Set(AGENTS.map(a=>a.entity)).size} entities
+              </div>
+            </div>
+
+            {/* Agent grid */}
+            <div style={{
+              display:'grid',
+              gridTemplateColumns:'repeat(auto-fill,minmax(210px,1fr))',
+              gap:14,
+            }}>
+              {AGENTS.map(agent=>(
+                <AgentCard
+                  key={agent.id}
+                  agent={agent}
+                  selected={selected?.id===agent.id}
+                  tick={tick}
+                  onSelect={()=>pick(agent)}
+                />
+              ))}
+            </div>
+
+            <Scoreboard agents={AGENTS} />
+
+            {/* Footer */}
+            <div style={{textAlign:'center',marginTop:24,fontSize:11,color:'#1e293b'}}>
+              Agent World v1.0 · Plug AI · Morris Stephon
+            </div>
+          </main>
+
+          {selected && (
+            <AgentPanel agent={selected} onClose={()=>setSelected(null)} />
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
